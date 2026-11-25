@@ -1,0 +1,26 @@
+TITRA SHQIP për ANDROID TV
+
+Një aplikacion-shfletues për televizor. Hap faqen ku transmetohet filmi,
+ndiz titrat (p.sh. anglisht) në player dhe përkthimi shqip shfaqet mbi video.
+
+=== SI TA KTHESH NË APK (zgjidh njërën) ===
+
+A) Pa instaluar asgjë – me GitHub (falas):
+ 1. Krijo llogari në github.com dhe një repository të ri.
+ 2. Ngarko aty të gjithë përmbajtjen e kësaj dosjeje ("Add file" > "Upload files"),
+    duke përfshirë dosjen .github (nëse nuk shfaqet, krijoje me dorë skedarin
+    .github/workflows/build.yml dhe kopjo përmbajtjen).
+ 3. Shko te skeda "Actions": ndërtimi nis vetë (~3-5 min).
+ 4. Kliko ndërtimin e përfunduar > shkarko "TitraShqip-APK" (zip me app-debug.apk).
+
+B) Me Android Studio:
+ File > Open > zgjidh dosjen TitraShqipTV > Build > Build APK(s).
+
+=== SI TA INSTALOSH NË TV ===
+ 1. Në TV: Settings > Device Preferences > Security > lejo "Unknown sources".
+ 2. Kalo APK-në me USB, ose me aplikacionin "Send Files to TV" / "Downloader".
+ 3. Hape "Titra Shqip" nga lista e aplikacioneve.
+
+=== PËRDORIMI ME TELEKOMANDË ===
+ - Butoni MENU: shkon te shiriti i adresës (shkruaj faqen e filmit).
+ - Butoni BACK: faqja e mëparshme / del nga ekrani i plotë.
