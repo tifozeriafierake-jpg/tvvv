@@ -59,7 +59,7 @@ public class MainActivity extends Activity {
             @Override public void onPageFinished(WebView v, String url) {
                 urlBar.setText(url);
                 prefs.edit().putString("last", url).apply();
-                if (!allFrames) v.evaluateJavascript(script, null);
+                v.evaluateJavascript(script, null);
             }
         });
         web.setWebChromeClient(new WebChromeClient() {
