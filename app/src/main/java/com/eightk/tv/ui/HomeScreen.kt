@@ -84,11 +84,11 @@ import java.util.Locale
 enum class Section(val label: String, val icon: ImageVector) {
     SEARCH("Kërko", Icons.Filled.Search),
     HOME("Kreu", Icons.Filled.Home),
-    LIVE("Live TV", Icons.Filled.PlayArrow),
-    MOVIES("Filma", Icons.Filled.Star),
-    SERIES("Seriale", Icons.AutoMirrored.Filled.List),
-    HISTORY("Historiku", Icons.Filled.DateRange),
-    FAVORITES("Preferuar", Icons.Filled.Favorite),
+    FAVORITES("Të preferuarat", Icons.Filled.Favorite),
+    LIVE("Live TV", TvIcons.LiveTv),
+    MOVIES("Filma", TvIcons.Movie),
+    SERIES("Seriale", TvIcons.Series),
+    HISTORY("Historiku", TvIcons.History),
     ACCOUNT("Llogaria", Icons.Filled.Person),
 }
 
@@ -140,45 +140,57 @@ fun HomeScreen(client: XtreamClient, onLogout: () -> Unit, onClientChanged: (Xtr
     Row(Modifier.fillMaxSize()) {
         // ---- Shiriti i ngushtë majtas me ikona ----
         Column(
-            Modifier.width(84.dp).fillMaxHeight().padding(vertical = 18.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
+            Modifier.width(186.dp).fillMaxHeight().background(Color.Black.copy(alpha = .25f))
+                .padding(vertical = 18.dp, horizontal = 10.dp),
         ) {
+            Row(Modifier.padding(start = 12.dp, bottom = 8.dp)) {
+                Text("8K", color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Black)
+                Text("tv", color = Accent, fontSize = 26.sp, fontWeight = FontWeight.Black)
+            }
             Spacer(Modifier.weight(1f))
             Section.entries.filter { it != Section.ACCOUNT }.forEach { s ->
                 val sel = s == section && !detailOpen
                 TvCard(
-                    Modifier.padding(vertical = 2.dp).width(76.dp).height(54.dp),
+                    Modifier.padding(vertical = 3.dp).fillMaxWidth().height(48.dp),
                     shape = RoundedCornerShape(10.dp),
                     bg = if (sel) CatSel else Color.Transparent,
                     focusBg = Color.White.copy(alpha = .18f),
                     focusBorder = false,
-                    scaleOnFocus = 1.05f,
+                    scaleOnFocus = 1.04f,
                     onFocus = { go(s) },
                     onClick = { go(s) },
                 ) { f ->
-                    Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(s.icon, s.label, Modifier.size(22.dp), tint = if (sel || f) Color.White else TextDim)
+                    Row(
+                        Modifier.fillMaxSize().padding(horizontal = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Box(Modifier.width(3.dp).height(22.dp).background(if (sel) Purple else Color.Transparent))
+                        Spacer(Modifier.width(9.dp))
+                        Icon(s.icon, s.label, Modifier.size(24.dp), tint = if (sel || f) Color.White else TextDim)
+                        Spacer(Modifier.width(12.dp))
                         Text(
-                            s.label, fontSize = 10.sp, maxLines = 1,
+                            s.label, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
                             color = if (sel || f) Color.White else TextDim,
-                            fontWeight = if (sel) FontWeight.Bold else FontWeight.Normal,
-                        )
-                        Box(
-                            Modifier.padding(top = 2.dp).height(2.dp).width(16.dp)
-                                .background(if (sel) Purple else Color.Transparent)
+                            fontWeight = if (sel) FontWeight.Bold else FontWeight.Medium,
                         )
                     }
                 }
             }
             Spacer(Modifier.weight(1f))
+            val accSel = section == Section.ACCOUNT && !detailOpen
             TvCard(
-                Modifier.size(40.dp), shape = CircleShape, bg = Color(0xFFF2C14E),
+                Modifier.fillMaxWidth().height(52.dp), shape = RoundedCornerShape(10.dp),
+                bg = if (accSel) CatSel else Color.Transparent, focusBg = Color.White.copy(alpha = .18f),
+                focusBorder = false, scaleOnFocus = 1.04f,
                 onFocus = { go(Section.ACCOUNT) }, onClick = { go(Section.ACCOUNT) },
             ) {
-                Text(
-                    client.user.take(1).uppercase(), Modifier.align(Alignment.Center),
-                    color = Color(0xFF5A3E00), fontWeight = FontWeight.Bold, fontSize = 16.sp,
-                )
+                Row(Modifier.fillMaxSize().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(32.dp).clip(CircleShape).background(Color(0xFFF2C14E)), contentAlignment = Alignment.Center) {
+                        Text(client.user.take(1).uppercase(), color = Color(0xFF5A3E00), fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                    }
+                    Spacer(Modifier.width(10.dp))
+                    Text("Llogaria", fontSize = 15.sp, color = Color.White, maxLines = 1)
+                }
             }
         }
 
@@ -304,10 +316,6 @@ fun HeroSlider(client: XtreamClient, slides: List<Slide>, focus: FocusRequester,
         Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(0.28f to Bg, 0.7f to Color.Transparent)))
         Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0.55f to Color.Transparent, 1f to Bg)))
 
-        Row(Modifier.align(Alignment.TopEnd).padding(28.dp)) {
-            Text("8K", color = Color.White, fontSize = 32.sp, fontWeight = FontWeight.Black)
-            Text("tv", color = Accent, fontSize = 32.sp, fontWeight = FontWeight.Black)
-        }
         Column(
             Modifier.align(Alignment.CenterStart).padding(start = 36.dp, top = 24.dp).fillMaxWidth(0.5f),
             verticalArrangement = Arrangement.spacedBy(10.dp),
