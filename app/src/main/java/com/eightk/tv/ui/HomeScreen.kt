@@ -87,10 +87,13 @@ fun playLive(ctx: android.content.Context, client: XtreamClient, list: List<Live
         list.map { PlayItem(it.name, client.liveUrl(it.id), it.id, it.icon) }, i, live = true,
     )
 
+data class OpenMovie(val item: PosterItem, val similar: List<PosterItem>)
+
 @Composable
 fun HomeScreen(client: XtreamClient, onLogout: () -> Unit, onClientChanged: (XtreamClient) -> Unit) {
-    var section by rememberSaveable { mutableStateOf(Section.HOME) }
+    var section by rememberSaveable { mutableStateOf(Section.LIVE) }
     var openSeries by remember { mutableStateOf<PosterItem?>(null) }
+    var openMovie by remember { mutableStateOf<OpenMovie?>(null) }
     val liveSel = remember { mutableStateOf<Category?>(null) }
     val vodSel = remember { mutableStateOf<Category?>(null) }
     val seriesSel = remember { mutableStateOf<Category?>(null) }
@@ -110,45 +113,65 @@ fun HomeScreen(client: XtreamClient, onLogout: () -> Unit, onClientChanged: (Xtr
         }
     }
 
+    fun go(s: Section) { section = s; openSeries = null; openMovie = null }
+    val detailOpen = openSeries != null || openMovie != null
+
     Row(Modifier.fillMaxSize()) {
-        // ---- Shiriti majtas me ikona ----
+        // ---- Shiriti i ngushtë majtas me ikona (si në Nimi TV) ----
         Column(
-            Modifier.width(88.dp).fillMaxHeight(),
-            verticalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterVertically),
+            Modifier.width(72.dp).fillMaxHeight().padding(vertical = 24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Section.entries.forEach { s ->
-                val sel = s == section && openSeries == null
+            Spacer(Modifier.weight(1f))
+            Section.entries.filter { it != Section.ACCOUNT }.forEach { s ->
+                val sel = s == section && !detailOpen
                 TvCard(
-                    Modifier.size(52.dp),
+                    Modifier.padding(vertical = 5.dp).size(48.dp),
                     shape = CircleShape,
                     bg = Color.Transparent,
                     focusBg = Color.White.copy(alpha = .15f),
-                    onFocus = { section = s; openSeries = null },
-                    onClick = { section = s; openSeries = null },
+                    focusBorder = false,
+                    onFocus = { go(s) },
+                    onClick = { go(s) },
                 ) { f ->
                     Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(s.icon, s.label, Modifier.size(26.dp), tint = if (sel || f) Color.White else TextDim)
+                        Icon(s.icon, s.label, Modifier.size(24.dp), tint = if (sel || f) Color.White else TextDim)
                         Box(
-                            Modifier.padding(top = 4.dp).height(2.dp).width(22.dp)
+                            Modifier.padding(top = 4.dp).height(2.dp).width(18.dp)
                                 .background(if (sel) Purple else Color.Transparent)
                         )
                     }
                 }
             }
+            Spacer(Modifier.weight(1f))
+            // Avatari i llogarisë poshtë
+            TvCard(
+                Modifier.size(40.dp), shape = CircleShape, bg = Color(0xFFF2C14E),
+                focusBorder = true, onFocus = { go(Section.ACCOUNT) }, onClick = { go(Section.ACCOUNT) },
+            ) {
+                Text(
+                    client.user.take(1).uppercase(), Modifier.align(Alignment.Center),
+                    color = Color(0xFF5A3E00), fontWeight = FontWeight.Bold, fontSize = 16.sp,
+                )
+            }
         }
 
         Box(Modifier.weight(1f).fillMaxHeight()) {
             val series = openSeries
-            if (series != null) {
-                SeriesDetail(client, series, onBack = { openSeries = null })
-            } else when (section) {
-                Section.SEARCH -> SearchTab(client) { openSeries = it }
-                Section.HOME -> HomeTab(client) { openSeries = it }
-                Section.LIVE -> LiveTab(client, liveSel)
-                Section.MOVIES -> MoviesTab(client, vodSel)
-                Section.SERIES -> SeriesTab(client, seriesSel) { openSeries = it }
-                Section.ACCOUNT -> AccountTab(client, onLogout)
+            val movie = openMovie
+            val toMovie: (OpenMovie) -> Unit = { openMovie = it; openSeries = null }
+            val toSeries: (PosterItem) -> Unit = { openSeries = it; openMovie = null }
+            when {
+                movie != null -> MovieDetail(client, movie, onBack = { openMovie = null }, onOpen = toMovie)
+                series != null -> SeriesDetail(client, series, onBack = { openSeries = null })
+                else -> when (section) {
+                    Section.SEARCH -> SearchTab(client, toSeries, toMovie)
+                    Section.HOME -> HomeTab(client, toSeries, toMovie)
+                    Section.LIVE -> LiveTab(client, liveSel)
+                    Section.MOVIES -> MoviesTab(client, vodSel, toMovie)
+                    Section.SERIES -> SeriesTab(client, seriesSel, toSeries)
+                    Section.ACCOUNT -> AccountTab(client, onLogout)
+                }
             }
         }
     }
@@ -158,10 +181,9 @@ fun HomeScreen(client: XtreamClient, onLogout: () -> Unit, onClientChanged: (Xtr
 
 data class HeroData(val title: String, val time: String?, val desc: String?, val image: String?, val isLogo: Boolean)
 
-private fun hm(sec: Long) = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(sec * 1000))
 
 @Composable
-fun HomeTab(client: XtreamClient, onOpenSeries: (PosterItem) -> Unit) {
+fun HomeTab(client: XtreamClient, onOpenSeries: (PosterItem) -> Unit, onOpenMovie: (OpenMovie) -> Unit) {
     val ctx = LocalContext.current
     val chans = rememberLoad("home-live") { client.allLive() }
     val movies = rememberLoad("home-vod") {
@@ -212,7 +234,8 @@ fun HomeTab(client: XtreamClient, onOpenSeries: (PosterItem) -> Unit) {
                         itemsIndexed(list) { i, ch ->
                             ChannelCard(
                                 i + 1, ch,
-                                Modifier.width(220.dp).let { if (i == 0) it.focusRequester(firstFocus) else it },
+                                Modifier.width(210.dp).let { if (i == 0) it.focusRequester(firstFocus) else it },
+                                epg = { client.epgNow(ch.id) },
                                 onFocus = { focusCh = ch },
                                 onClick = { playLive(ctx, client, list, i) },
                             )
@@ -223,13 +246,10 @@ fun HomeTab(client: XtreamClient, onOpenSeries: (PosterItem) -> Unit) {
             item {
                 RowTitle("Filma")
                 LoadView(movies, Modifier.fillMaxWidth().height(240.dp)) { list ->
-                    PosterRow(list.map { PosterItem(it.id, it.name, it.icon, null, it.rating) },
+                    val posters = remember(list) { list.map { PosterItem(it.id, it.name, it.icon, null, it.rating, it.ext) } }
+                    PosterRow(posters,
                         onFocus = { p -> focusCh = null; hero = HeroData(p.title, p.rating?.let { "★ $it" }, null, p.image, false) },
-                        onClick = { p ->
-                            list.firstOrNull { it.id == p.id }?.let { v ->
-                                Playback.open(ctx, client, listOf(PlayItem(v.name, client.vodUrl(v.id, v.ext))), 0, live = false)
-                            }
-                        })
+                        onClick = { p -> onOpenMovie(OpenMovie(p, posters)) })
                 }
             }
             item {
@@ -307,20 +327,17 @@ fun HeroBanner(hero: HeroData?, modifier: Modifier) {
 
 @Composable
 fun BrowseTab(
-    title: String,
     cats: Load<List<Category>>,
     selState: MutableState<Category?>,
     content: @Composable (Category) -> Unit,
 ) {
     var sel by selState
-    Column(Modifier.fillMaxSize().padding(top = 28.dp, start = 12.dp, end = 24.dp)) {
-        Text(title, Modifier.padding(start = 8.dp, bottom = 8.dp), fontSize = 30.sp, fontWeight = FontWeight.Bold)
-        LoadView(cats) { list ->
-            if (list.isEmpty()) Empty() else {
-                LaunchedEffect(list) { if (sel == null || list.none { it.id == sel?.id }) sel = list.first() }
-                CategoryTabs(list, sel?.id) { sel = it }
-                Spacer(Modifier.height(10.dp))
-                Box(Modifier.fillMaxSize()) { sel?.let { content(it) } }
+    LoadView(cats) { list ->
+        if (list.isEmpty()) Empty() else {
+            LaunchedEffect(list) { if (sel == null || list.none { it.id == sel?.id }) sel = list.first() }
+            Row(Modifier.fillMaxSize()) {
+                CategoryColumn(list, sel?.id) { sel = it }
+                Box(Modifier.weight(1f).fillMaxHeight()) { sel?.let { content(it) } }
             }
         }
     }
@@ -329,21 +346,21 @@ fun BrowseTab(
 @Composable
 fun LiveTab(client: XtreamClient, selState: MutableState<Category?>) {
     val ctx = LocalContext.current
-    val cats = rememberLoad("live-cats") { listOf(Category(ALL, "Të gjitha")) + client.categories("live") }
-    BrowseTab("Kanalet Live", cats, selState) { cat ->
+    val cats = rememberLoad("live-cats") { listOf(Category(ALL, "All")) + client.categories("live") }
+    BrowseTab(cats, selState) { cat ->
         val streams = rememberLoad("live", cat.id) {
             if (cat.id == ALL) client.allLive() else client.liveStreams(cat.id)
         }
         LoadView(streams) { chans ->
             if (chans.isEmpty()) Empty() else
                 LazyVerticalGrid(
-                    GridCells.Fixed(6), Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(10.dp),
-                    horizontalArrangement = Arrangement.spacedBy(14.dp),
-                    verticalArrangement = Arrangement.spacedBy(14.dp),
+                    GridCells.Fixed(4), Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(start = 8.dp, end = 28.dp, top = 24.dp, bottom = 24.dp),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
                 ) {
                     itemsIndexed(chans) { i, ch ->
-                        ChannelCard(i + 1, ch, onClick = { playLive(ctx, client, chans, i) })
+                        ChannelCard(i + 1, ch, epg = { client.epgNow(ch.id) }, onClick = { playLive(ctx, client, chans, i) })
                     }
                 }
         }
@@ -354,8 +371,8 @@ fun LiveTab(client: XtreamClient, selState: MutableState<Category?>) {
 fun PosterGrid(items: List<PosterItem>, onClick: (PosterItem) -> Unit) {
     if (items.isEmpty()) Empty() else
         LazyVerticalGrid(
-            GridCells.Fixed(7), Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(10.dp),
+            GridCells.Fixed(6), Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(start = 8.dp, end = 28.dp, top = 24.dp, bottom = 24.dp),
             horizontalArrangement = Arrangement.spacedBy(14.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
@@ -364,17 +381,13 @@ fun PosterGrid(items: List<PosterItem>, onClick: (PosterItem) -> Unit) {
 }
 
 @Composable
-fun MoviesTab(client: XtreamClient, selState: MutableState<Category?>) {
-    val ctx = LocalContext.current
+fun MoviesTab(client: XtreamClient, selState: MutableState<Category?>, onOpen: (OpenMovie) -> Unit) {
     val cats = rememberLoad("vod-cats") { client.categories("vod") }
-    BrowseTab("Filma", cats, selState) { cat ->
+    BrowseTab(cats, selState) { cat ->
         val movies = rememberLoad("vod", cat.id) { client.vod(cat.id) }
         LoadView(movies) { list ->
-            PosterGrid(list.map { PosterItem(it.id, it.name, it.icon, null, it.rating) }) { p ->
-                list.firstOrNull { it.id == p.id }?.let { v ->
-                    Playback.open(ctx, client, listOf(PlayItem(v.name, client.vodUrl(v.id, v.ext))), 0, live = false)
-                }
-            }
+            val posters = remember(list) { list.map { PosterItem(it.id, it.name, it.icon, null, it.rating, it.ext) } }
+            PosterGrid(posters) { p -> onOpen(OpenMovie(p, posters)) }
         }
     }
 }
@@ -382,7 +395,7 @@ fun MoviesTab(client: XtreamClient, selState: MutableState<Category?>) {
 @Composable
 fun SeriesTab(client: XtreamClient, selState: MutableState<Category?>, onOpen: (PosterItem) -> Unit) {
     val cats = rememberLoad("series-cats") { client.categories("series") }
-    BrowseTab("Seriale", cats, selState) { cat ->
+    BrowseTab(cats, selState) { cat ->
         val series = rememberLoad("series", cat.id) { client.series(cat.id) }
         LoadView(series) { list ->
             PosterGrid(list.map { PosterItem(it.id, it.name, it.cover, it.plot) }, onOpen)
@@ -465,7 +478,7 @@ fun SeriesDetail(client: XtreamClient, s: PosterItem, onBack: () -> Unit) {
 // ================= KËRKIMI =================
 
 @Composable
-fun SearchTab(client: XtreamClient, onOpenSeries: (PosterItem) -> Unit) {
+fun SearchTab(client: XtreamClient, onOpenSeries: (PosterItem) -> Unit, onOpenMovie: (OpenMovie) -> Unit) {
     val ctx = LocalContext.current
     var q by rememberSaveable { mutableStateOf("") }
     val live = rememberLoad("s-live") { client.allLive() }
@@ -496,7 +509,7 @@ fun SearchTab(client: XtreamClient, onOpenSeries: (PosterItem) -> Unit) {
                     if (res.isEmpty()) Empty("Asnjë kanal") else
                         LazyRow(horizontalArrangement = Arrangement.spacedBy(14.dp), contentPadding = PaddingValues(8.dp)) {
                             itemsIndexed(res) { i, ch ->
-                                ChannelCard(all.indexOf(ch) + 1, ch, Modifier.width(220.dp), onClick = { playLive(ctx, client, res, i) })
+                                ChannelCard(all.indexOf(ch) + 1, ch, Modifier.width(210.dp), epg = { client.epgNow(ch.id) }, onClick = { playLive(ctx, client, res, i) })
                             }
                         }
                 }
@@ -505,11 +518,8 @@ fun SearchTab(client: XtreamClient, onOpenSeries: (PosterItem) -> Unit) {
                 RowTitle("Filma")
                 LoadView(vod, Modifier.fillMaxWidth().height(240.dp)) { all ->
                     val res = remember(query, all) { all.filter { it.name.contains(query, true) }.take(40) }
-                    PosterRow(res.map { PosterItem(it.id, it.name, it.icon) }) { p ->
-                        res.firstOrNull { it.id == p.id }?.let { v ->
-                            Playback.open(ctx, client, listOf(PlayItem(v.name, client.vodUrl(v.id, v.ext))), 0, live = false)
-                        }
-                    }
+                    val posters = res.map { PosterItem(it.id, it.name, it.icon, null, it.rating, it.ext) }
+                    PosterRow(posters) { p -> onOpenMovie(OpenMovie(p, posters)) }
                 }
             }
             item {
@@ -549,18 +559,95 @@ fun AccountTab(client: XtreamClient, onLogout: () -> Unit) {
             Spacer(Modifier.height(8.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 ActionButton("Rifresko listat", CardBg.copy(alpha = 0f)) { client.clearCache() }
-                ActionButton("Dil nga llogaria", Accent, onLogout)
+                ActionButton("Dil nga llogaria", Accent, onClick = onLogout)
             }
         }
     }
 }
 
 @Composable
-fun ActionButton(text: String, color: Color, onClick: () -> Unit) {
+fun ActionButton(text: String, color: Color, modifier: Modifier = Modifier, onClick: () -> Unit) {
     TvCard(
+        modifier,
         bg = if (color.alpha == 0f) Color.White.copy(alpha = .1f) else color,
         shape = RoundedCornerShape(8.dp), scaleOnFocus = 1.05f, onClick = onClick,
     ) {
         Text(text, Modifier.padding(horizontal = 22.dp, vertical = 12.dp), fontWeight = FontWeight.SemiBold)
+    }
+}
+
+// ================= DETAJET E FILMIT =================
+
+@Composable
+fun MovieDetail(client: XtreamClient, m: OpenMovie, onBack: () -> Unit, onOpen: (OpenMovie) -> Unit) {
+    val ctx = LocalContext.current
+    BackHandler(onBack = onBack)
+    val p = m.item
+    val info = rememberLoad("vinfo", p.id) { client.vodInfo(p.id) }
+    val inf = (info as? Load.Ok)?.value
+    val playFocus = remember { FocusRequester() }
+    LaunchedEffect(p.id) { delay(120); runCatching { playFocus.requestFocus() } }
+    val similar = remember(m) { m.similar.filter { it.id != p.id }.take(30) }
+
+    fun play() = Playback.open(
+        ctx, client, listOf(PlayItem(p.title, client.vodUrl(p.id, p.ext ?: "mp4"))), 0, live = false,
+    )
+
+    Box(Modifier.fillMaxSize()) {
+        AsyncImage(
+            inf?.backdrop ?: p.image, null,
+            Modifier.align(Alignment.TopEnd).fillMaxWidth(0.65f).fillMaxHeight(0.7f).alpha(0.6f),
+            contentScale = ContentScale.Crop,
+        )
+        Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(0.3f to Bg, 0.75f to Color.Transparent)))
+        Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0.3f to Color.Transparent, 0.7f to Bg)))
+
+        LazyColumn(
+            Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(start = 40.dp, end = 24.dp, top = 56.dp, bottom = 40.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            item {
+                Row(verticalAlignment = Alignment.Top) {
+                    AsyncImage(
+                        p.image, p.title,
+                        Modifier.width(150.dp).aspectRatio(2f / 3f).clip(RoundedCornerShape(10.dp)),
+                        contentScale = ContentScale.Crop,
+                    )
+                    Spacer(Modifier.width(28.dp))
+                    Column(Modifier.fillMaxWidth(0.6f), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Text(p.title, fontSize = 40.sp, fontWeight = FontWeight.Bold, lineHeight = 46.sp,
+                            maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        val meta = listOfNotNull(
+                            inf?.year, inf?.duration, (inf?.rating ?: p.rating)?.let { "★ $it" }, inf?.genre,
+                        ).joinToString("   ·   ")
+                        if (meta.isNotBlank()) Text(meta, color = TextDim, fontSize = 16.sp)
+                        ActionButton("▶   Shiko", Accent, Modifier.focusRequester(playFocus).width(200.dp)) { play() }
+                    }
+                }
+            }
+            item {
+                Column(Modifier.fillMaxWidth(0.7f).padding(top = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Përshkrimi", fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        when (info) {
+                            Load.Loading -> "Duke ngarkuar…"
+                            else -> inf?.plot ?: "Nuk ka përshkrim për këtë film."
+                        },
+                        fontSize = 17.sp, lineHeight = 26.sp, color = Color(0xFFD6D6DA),
+                    )
+                    inf?.director?.let { Text("Regjia: $it", fontSize = 15.sp, color = TextDim) }
+                    inf?.cast?.let { Text("Aktorët: $it", fontSize = 15.sp, color = TextDim, maxLines = 2, overflow = TextOverflow.Ellipsis) }
+                }
+            }
+            if (similar.isNotEmpty()) {
+                item {
+                    Column(Modifier.padding(top = 12.dp)) {
+                        RowTitle("Më shumë si kjo")
+                        PosterRow(similar) { onOpen(OpenMovie(it, m.similar)) }
+                    }
+                }
+            }
+        }
     }
 }

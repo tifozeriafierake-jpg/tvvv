@@ -37,6 +37,11 @@ object Config {
 
 class AuthException(msg: String) : IOException(msg)
 
+data class VodInfo(
+    val plot: String?, val genre: String?, val cast: String?, val director: String?,
+    val year: String?, val duration: String?, val rating: String?, val backdrop: String?,
+)
+
 data class EpgNow(val title: String, val desc: String, val start: Long, val end: Long)
 
 /** Provon të gjithë serverët paralelisht; kthen klientin e parë që hyn me sukses. */
@@ -184,17 +189,48 @@ class XtreamClient(server: String, val user: String, val pass: String) {
         }
     }
 
-    suspend fun epgNow(streamId: Int): EpgNow? = cached("epg-$streamId") {
-        val o = JSONObject(call("get_short_epg", "&stream_id=$streamId&limit=1"))
-        val e = o.optJSONArray("epg_listings")?.optJSONObject(0)
-        listOfNotNull(e?.let {
+    private val epgCache = HashMap<Int, Pair<Long, List<EpgNow>>>()
+
+    /** Programi aktual dhe ai që vjen (EPG). Rifreskohet kur mbaron programi. */
+    suspend fun epg(streamId: Int): List<EpgNow> {
+        val now = System.currentTimeMillis() / 1000
+        epgCache[streamId]?.let { (at, l) ->
+            val valid = if (l.isEmpty()) now - at < 600 else l.first().end > now
+            if (valid) return l
+        }
+        val o = JSONObject(call("get_short_epg", "&stream_id=$streamId&limit=4"))
+        val list = (o.optJSONArray("epg_listings") ?: JSONArray()).objects {
             EpgNow(
                 b64(it.optString("title")), b64(it.optString("description")),
                 it.optString("start_timestamp").toLongOrNull() ?: 0L,
                 it.optString("stop_timestamp").toLongOrNull() ?: 0L,
             )
-        })
-    }.firstOrNull()
+        }.filter { it.end == 0L || it.end > now }.take(2)
+        epgCache[streamId] = now to list
+        return list
+    }
+
+    suspend fun epgNow(streamId: Int): EpgNow? = epg(streamId).firstOrNull()
+
+    suspend fun vodInfo(id: Int): VodInfo = cached("vinfo-$id") {
+        val o = JSONObject(call("get_vod_info", "&vod_id=$id"))
+        val i = o.optJSONObject("info") ?: JSONObject()
+        val backdrop = when (val b = i.opt("backdrop_path")) {
+            is JSONArray -> b.optString(0)
+            is String -> b
+            else -> null
+        }?.takeIf { it.isNotBlank() && it != "null" }
+        VodInfo(
+            plot = i.str("plot") ?: i.str("description"),
+            genre = i.str("genre"),
+            cast = i.str("cast") ?: i.str("actors"),
+            director = i.str("director"),
+            year = (i.str("releasedate") ?: i.str("release_date"))?.take(4),
+            duration = i.str("duration"),
+            rating = i.str("rating"),
+            backdrop = backdrop,
+        )
+    }
 
     private fun b64(s: String): String = try {
         String(Base64.decode(s, Base64.DEFAULT), Charsets.UTF_8).trim()

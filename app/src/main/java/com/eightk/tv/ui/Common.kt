@@ -50,19 +50,47 @@ import coil.compose.AsyncImage
 import com.eightk.tv.data.Category
 import com.eightk.tv.data.LiveStream
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
+import com.eightk.tv.data.EpgNow
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.runtime.LaunchedEffect
 
 // ---- Ngjyrat (stil Nimi TV) ----
 val Accent = Color(0xFFE4252B)      // e kuqe
 val Purple = Color(0xFF8E7CFF)      // vija e zgjedhjes
-val Bg = Color(0xFF0B1118)
-val CardBg = Color(0xFF25282D)
-val TextDim = Color(0xFFB4B9C2)
+val Bg = Color(0xFF161618)
+val CardBg = Color(0xFF2B2B2E)
+val CatSel = Color(0xFF3A3A3E)
+val TextDim = Color(0xFFA8A8AE)
 
 val BgBrush = Brush.linearGradient(
-    listOf(Color(0xFF0A0F16), Color(0xFF0F1C29), Color(0xFF1B3A4F)),
+    listOf(Color(0xFF121214), Color(0xFF19191C), Color(0xFF1F1F23)),
     start = Offset(0f, Float.POSITIVE_INFINITY),
     end = Offset(Float.POSITIVE_INFINITY, 0f),
 )
+
+fun hm(sec: Long): String = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(sec * 1000))
+
+fun progressOf(e: EpgNow): Float {
+    if (e.end <= e.start) return 0f
+    val now = System.currentTimeMillis() / 1000
+    return ((now - e.start).toFloat() / (e.end - e.start)).coerceIn(0f, 1f)
+}
+
+/** Shirit progresi (sa ka ecur programi) */
+@Composable
+fun ProgressLine(frac: Float, modifier: Modifier = Modifier) {
+    Box(modifier.height(3.dp).clip(RoundedCornerShape(2.dp)).background(Color.White.copy(alpha = .18f))) {
+        Box(Modifier.fillMaxWidth(frac).fillMaxHeight().background(Purple))
+    }
+}
 
 @Composable
 fun AppTheme(content: @Composable () -> Unit) {
@@ -81,6 +109,7 @@ fun TvCard(
     bg: Color = CardBg,
     focusBg: Color = bg,
     scaleOnFocus: Float = 1.07f,
+    focusBorder: Boolean = true,
     onFocus: () -> Unit = {},
     onClick: () -> Unit,
     content: @Composable BoxScope.(focused: Boolean) -> Unit,
@@ -93,7 +122,7 @@ fun TvCard(
             .graphicsLayer { scaleX = scale; scaleY = scale }
             .clip(shape)
             .background(if (focused) focusBg else bg)
-            .then(if (focused) Modifier.border(3.dp, Color.White, shape) else Modifier)
+            .then(if (focused && focusBorder) Modifier.border(3.dp, Color.White, shape) else Modifier)
             .onFocusChanged { focused = it.isFocused; if (it.isFocused) onFocus() }
             .clickable(remember { MutableInteractionSource() }, indication = null, onClick = onClick)
     ) { content(focused) }
@@ -135,36 +164,95 @@ fun CategoryTabs(cats: List<Category>, selectedId: String?, onSelect: (Category)
     }
 }
 
+/** Vertical list of categories (ALL, SHQIP, LAJME, SPORT…) */
+@Composable
+fun CategoryColumn(cats: List<Category>, selectedId: String?, onSelect: (Category) -> Unit) {
+    LazyColumn(
+        Modifier.width(190.dp).fillMaxHeight(),
+        contentPadding = PaddingValues(start = 6.dp, end = 10.dp, top = 24.dp, bottom = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        items(cats) { c ->
+            val sel = c.id == selectedId
+            TvCard(
+                Modifier.fillMaxWidth(),
+                bg = if (sel) CatSel else Color.Transparent,
+                focusBg = Color(0xFF4A4A4F),
+                shape = RoundedCornerShape(6.dp),
+                scaleOnFocus = 1.02f,
+                focusBorder = false,
+                onFocus = { onSelect(c) },
+                onClick = { onSelect(c) },
+            ) { f ->
+                Text(
+                    c.name.uppercase(),
+                    Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                    fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    fontWeight = if (sel) FontWeight.Bold else FontWeight.Medium,
+                    color = if (sel || f) Color.White else TextDim,
+                )
+            }
+        }
+    }
+}
+
+/** Channel card: logo + number. On focus it shows what is airing now (EPG) with a progress bar. */
 @Composable
 fun ChannelCard(
     number: Int,
     ch: LiveStream,
     modifier: Modifier = Modifier,
+    epg: (suspend () -> EpgNow?)? = null,
     onFocus: () -> Unit = {},
     onClick: () -> Unit,
 ) {
-    TvCard(modifier.aspectRatio(1.55f), onFocus = onFocus, onClick = onClick) {
-        if (ch.icon != null) {
-            AsyncImage(
-                ch.icon, ch.name,
-                Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 18.dp),
-                contentScale = ContentScale.Fit,
-            )
+    var now by remember(ch.id) { mutableStateOf<EpgNow?>(null) }
+    TvCard(modifier.aspectRatio(1.35f), onFocus = onFocus, onClick = onClick, scaleOnFocus = 1.06f) { focused ->
+        if (epg != null) {
+            LaunchedEffect(focused, ch.id) {
+                if (focused) { delay(250); now = runCatching { epg() }.getOrNull() }
+            }
+        }
+        val e = now
+        if (focused && e != null) {
+            Column(Modifier.fillMaxSize().padding(12.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    AsyncImage(ch.icon, null, Modifier.size(46.dp, 28.dp), contentScale = ContentScale.Fit)
+                    Spacer(Modifier.width(8.dp))
+                    Text("$number.${ch.name}", fontSize = 12.sp, color = TextDim, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+                Spacer(Modifier.height(6.dp))
+                Text(e.title, fontSize = 16.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis, lineHeight = 19.sp)
+                Text("${hm(e.start)} - ${hm(e.end)}", fontSize = 12.sp, color = TextDim)
+                Spacer(Modifier.weight(1f))
+                ProgressLine(progressOf(e), Modifier.fillMaxWidth())
+            }
         } else {
+            if (ch.icon != null) {
+                AsyncImage(
+                    ch.icon, ch.name,
+                    Modifier.fillMaxSize().padding(horizontal = 26.dp, vertical = 24.dp),
+                    contentScale = ContentScale.Fit,
+                )
+            } else {
+                Text(
+                    ch.name, Modifier.align(Alignment.Center).padding(10.dp),
+                    fontSize = 16.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center,
+                    maxLines = 2, overflow = TextOverflow.Ellipsis,
+                )
+            }
             Text(
-                ch.name, Modifier.align(Alignment.Center).padding(10.dp),
-                fontSize = 16.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center,
-                maxLines = 2, overflow = TextOverflow.Ellipsis,
+                "$number", Modifier.align(Alignment.BottomEnd).padding(10.dp),
+                fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White,
             )
         }
-        Text(
-            "$number", Modifier.align(Alignment.BottomEnd).padding(8.dp),
-            fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.White,
-        )
     }
 }
 
-data class PosterItem(val id: Int, val title: String, val image: String?, val info: String? = null, val rating: String? = null)
+data class PosterItem(
+    val id: Int, val title: String, val image: String?, val info: String? = null,
+    val rating: String? = null, val ext: String? = null,
+)
 
 @Composable
 fun PosterCard(

@@ -27,6 +27,8 @@ import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.ProgressBar
+import android.content.res.ColorStateList
 import androidx.lifecycle.lifecycleScope
 import coil.load
 import com.eightk.tv.data.Config
@@ -66,6 +68,9 @@ class PlayerActivity : ComponentActivity() {
     private lateinit var number: TextView
     private lateinit var name: TextView
     private lateinit var epg: TextView
+    private lateinit var desc: TextView
+    private lateinit var next: TextView
+    private lateinit var progress: ProgressBar
     private var epgJob: Job? = null
     private var index = 0
     private var triedTs = false
@@ -111,10 +116,21 @@ class PlayerActivity : ComponentActivity() {
             setPadding(px(20), 0, px(20), 0)
         }
         name = TextView(this).apply { setTextColor(Color.WHITE); textSize = 28f; typeface = Typeface.DEFAULT_BOLD }
-        epg = TextView(this).apply { setTextColor(0xFFB4B9C2.toInt()); textSize = 18f; maxLines = 2 }
+        epg = TextView(this).apply { setTextColor(Color.WHITE); textSize = 20f; maxLines = 1; typeface = Typeface.DEFAULT_BOLD }
+        desc = TextView(this).apply { setTextColor(0xFFB4B9C2.toInt()); textSize = 15f; maxLines = 2 }
+        next = TextView(this).apply { setTextColor(0xFF8E8E95.toInt()); textSize = 15f; maxLines = 1 }
+        progress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+            max = 1000
+            progressTintList = ColorStateList.valueOf(0xFF8E7CFF.toInt())
+            progressBackgroundTintList = ColorStateList.valueOf(0x40FFFFFF)
+        }
         val texts = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            addView(name); addView(epg)
+            addView(name)
+            addView(epg, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { topMargin = px(6) })
+            addView(progress, LinearLayout.LayoutParams(px(520), px(6)).apply { topMargin = px(8); bottomMargin = px(8) })
+            addView(desc, LinearLayout.LayoutParams(px(820), WRAP_CONTENT))
+            addView(next, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { topMargin = px(6) })
         }
         info = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -170,27 +186,48 @@ class PlayerActivity : ComponentActivity() {
         number.visibility = if (live) View.VISIBLE else View.GONE
         number.text = "${index + 1}"
         name.text = cur.title
-        epg.text = ""
+        setEpgVisible(false)
         epgJob?.cancel()
         val c = Playback.client
         val id = cur.streamId
         if (live && c != null && id != null) {
+            epg.text = "Duke ngarkuar programin…"
+            epg.visibility = View.VISIBLE
             epgJob = lifecycleScope.launch {
-                runCatching { c.epgNow(id) }.getOrNull()?.let { e ->
-                    val f = SimpleDateFormat("HH:mm", Locale.getDefault())
-                    val time = if (e.start > 0) "${f.format(Date(e.start * 1000))} - ${f.format(Date(e.end * 1000))}  " else ""
-                    epg.text = "$time${e.title}"
+                val list = runCatching { c.epg(id) }.getOrNull().orEmpty()
+                val now = list.getOrNull(0)
+                val nx = list.getOrNull(1)
+                if (now == null) {
+                    epg.text = "Nuk ka informacion për programin"
+                    return@launch
                 }
+                setEpgVisible(true)
+                epg.text = "Tani:  ${t(now.start)} - ${t(now.end)}   ${now.title}"
+                desc.text = now.desc
+                desc.visibility = if (now.desc.isBlank()) View.GONE else View.VISIBLE
+                val span = (now.end - now.start).coerceAtLeast(1)
+                progress.progress = (((System.currentTimeMillis() / 1000 - now.start) * 1000) / span).toInt().coerceIn(0, 1000)
+                next.text = nx?.let { "Më pas:  ${t(it.start)}   ${it.title}" } ?: ""
+                next.visibility = if (nx == null) View.GONE else View.VISIBLE
             }
         }
-        reveal(5000)
+        reveal(7000)
+    }
+
+    private fun t(sec: Long) = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(sec * 1000))
+
+    private fun setEpgVisible(v: Boolean) {
+        val vis = if (v) View.VISIBLE else View.GONE
+        epg.visibility = vis; desc.visibility = vis; next.visibility = vis; progress.visibility = vis
     }
 
     private fun showText(title: String, sub: String, ms: Long = 4000) {
         logo.visibility = View.GONE
         number.visibility = View.GONE
         name.text = title
+        setEpgVisible(false)
         epg.text = sub
+        epg.visibility = if (sub.isBlank()) View.GONE else View.VISIBLE
         reveal(ms)
     }
 
