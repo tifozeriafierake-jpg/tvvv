@@ -177,33 +177,116 @@ fun CategoryTabs(cats: List<Category>, selectedId: String?, onSelect: (Category)
     }
 }
 
-/** Vertical list of categories (ALL, SHQIP, LAJME, SPORT…) */
+// ---- Shtetet dhe kategoritë ----
+
+data class CatGroup(val key: String, val name: String, val cats: List<Category>)
+
+private val prefixRe = Regex("""^\s*([A-Za-z0-9]{2,6}(?:-[A-Za-z0-9]{2,4})?)\s*(?:\||:|\s[-–])\s*(.+)$""")
+
+private val countryNames = mapOf(
+    "AL" to "Shqipëri", "ALB" to "Shqipëri", "KS" to "Kosovë", "KOS" to "Kosovë", "MK" to "Maqedoni",
+    "GR" to "Greqi", "IT" to "Itali", "UK" to "Angli", "GB" to "Angli", "US" to "SHBA", "USA" to "SHBA",
+    "DE" to "Gjermani", "FR" to "Francë", "ES" to "Spanjë", "TR" to "Turqi", "CH" to "Zvicër",
+    "AT" to "Austri", "NL" to "Holandë", "BE" to "Belgjikë", "SE" to "Suedi", "NO" to "Norvegji",
+    "DK" to "Danimarkë", "FI" to "Finlandë", "PT" to "Portugali", "PL" to "Poloni", "RO" to "Rumani",
+    "BG" to "Bullgari", "HR" to "Kroaci", "RS" to "Serbi", "BA" to "Bosnjë", "ME" to "Mal i Zi",
+    "SI" to "Slloveni", "HU" to "Hungari", "CZ" to "Çeki", "SK" to "Sllovaki", "RU" to "Rusi",
+    "UA" to "Ukrainë", "AR" to "Arabe", "IN" to "Indi", "PK" to "Pakistan", "CA" to "Kanada",
+    "AU" to "Australi", "BR" to "Brazil", "MX" to "Meksikë", "LAT" to "Amerika Latine", "IR" to "Iran",
+    "IE" to "Irlandë", "CY" to "Qipro", "EX-YU" to "Ex-YU", "YU" to "Ex-YU", "AF" to "Afrikë",
+)
+
+/** Ndan kategoritë sipas shtetit nga prefiksi (p.sh. "AL| ALBANIA GOLD", "GR - ΚΙΝΗΜΑΤΟΓΡΑΦΟΣ") */
+fun groupCategories(cats: List<Category>): List<CatGroup> {
+    val order = LinkedHashMap<String, MutableList<Category>>()
+    for (c in cats) {
+        val m = prefixRe.find(c.name)
+        val code = m?.groupValues?.get(1)?.uppercase() ?: "__other"
+        val label = m?.groupValues?.get(2)?.trim()?.ifBlank { null } ?: c.name
+        order.getOrPut(code) { mutableListOf() } += Category(c.id, label)
+    }
+    return order.map { (code, list) ->
+        val name = when (code) {
+            "__other" -> "Të tjera"
+            else -> countryNames[code]?.let { "$it ($code)" } ?: code
+        }
+        CatGroup(code, name, list)
+    }
+}
+
 @Composable
-fun CategoryColumn(cats: List<Category>, selectedId: String?, onSelect: (Category) -> Unit) {
+private fun CatRow(
+    text: String,
+    sel: Boolean,
+    indent: Boolean,
+    bold: Boolean = false,
+    onFocus: () -> Unit = {},
+    onClick: () -> Unit,
+) {
+    TvCard(
+        Modifier.fillMaxWidth().padding(start = if (indent) 12.dp else 0.dp),
+        bg = if (sel) CatSel else Color.Transparent,
+        focusBg = Color(0xFF4A4A4F),
+        shape = RoundedCornerShape(6.dp),
+        scaleOnFocus = 1.02f,
+        focusBorder = false,
+        onFocus = onFocus,
+        onClick = onClick,
+    ) { f ->
+        Text(
+            text,
+            Modifier.padding(horizontal = 14.dp, vertical = if (indent) 9.dp else 12.dp),
+            fontSize = if (indent) 13.sp else 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+            fontWeight = if (sel || bold) FontWeight.Bold else FontWeight.Medium,
+            color = if (sel || f) Color.White else TextDim,
+        )
+    }
+}
+
+/**
+ * Lista anash: sipër "All"/"Të preferuarat", pastaj shtetet.
+ * Kur shtyp OK mbi një shtet, hapen poshtë tij kategoritë e atij shteti.
+ */
+@Composable
+fun CountryCategoryColumn(
+    top: List<Category>,
+    cats: List<Category>,
+    selectedId: String?,
+    onSelect: (Category) -> Unit,
+) {
+    val groups = remember(cats) { groupCategories(cats) }
+    val flat = groups.size <= 1
+    var open by remember(groups) {
+        mutableStateOf(groups.firstOrNull { g -> g.cats.any { it.id == selectedId } }?.key)
+    }
     LazyColumn(
-        Modifier.width(190.dp).fillMaxHeight(),
+        Modifier.width(230.dp).fillMaxHeight(),
         contentPadding = PaddingValues(start = 6.dp, end = 10.dp, top = 24.dp, bottom = 24.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
+        verticalArrangement = Arrangement.spacedBy(3.dp),
     ) {
-        items(cats) { c ->
-            val sel = c.id == selectedId
-            TvCard(
-                Modifier.fillMaxWidth(),
-                bg = if (sel) CatSel else Color.Transparent,
-                focusBg = Color(0xFF4A4A4F),
-                shape = RoundedCornerShape(6.dp),
-                scaleOnFocus = 1.02f,
-                focusBorder = false,
-                onFocus = { onSelect(c) },
-                onClick = { onSelect(c) },
-            ) { f ->
-                Text(
-                    c.name.uppercase(),
-                    Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-                    fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                    fontWeight = if (sel) FontWeight.Bold else FontWeight.Medium,
-                    color = if (sel || f) Color.White else TextDim,
-                )
+        items(top, key = { "t-" + it.id }) { c ->
+            CatRow(c.name.uppercase(), c.id == selectedId, false, onFocus = { onSelect(c) }, onClick = { onSelect(c) })
+        }
+        if (flat) {
+            items(cats, key = { "c-" + it.id }) { c ->
+                CatRow(c.name.uppercase(), c.id == selectedId, false, onFocus = { onSelect(c) }, onClick = { onSelect(c) })
+            }
+        } else {
+            groups.forEach { g ->
+                val isOpen = open == g.key
+                val hasSel = g.cats.any { it.id == selectedId }
+                item(key = "g-" + g.key) {
+                    CatRow(
+                        "${if (isOpen) "▾" else "▸"}  ${g.name}  ·  ${g.cats.size}",
+                        sel = hasSel && !isOpen, indent = false, bold = isOpen,
+                        onClick = { open = if (isOpen) null else g.key },
+                    )
+                }
+                if (isOpen) {
+                    items(g.cats, key = { "c-" + it.id }) { c ->
+                        CatRow(c.name, c.id == selectedId, true, onFocus = { onSelect(c) }, onClick = { onSelect(c) })
+                    }
+                }
             }
         }
     }

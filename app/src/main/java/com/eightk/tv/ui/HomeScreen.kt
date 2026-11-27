@@ -51,6 +51,11 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -78,12 +83,12 @@ import java.util.Locale
 
 enum class Section(val label: String, val icon: ImageVector) {
     SEARCH("Kërko", Icons.Filled.Search),
-    HOME("Kryefaqja", Icons.Filled.Home),
+    HOME("Kreu", Icons.Filled.Home),
     LIVE("Live TV", Icons.Filled.PlayArrow),
     MOVIES("Filma", Icons.Filled.Star),
     SERIES("Seriale", Icons.AutoMirrored.Filled.List),
     HISTORY("Historiku", Icons.Filled.DateRange),
-    FAVORITES("Të preferuarat", Icons.Filled.Favorite),
+    FAVORITES("Preferuar", Icons.Filled.Favorite),
     ACCOUNT("Llogaria", Icons.Filled.Person),
 }
 
@@ -109,7 +114,7 @@ fun playMovie(ctx: Context, client: XtreamClient, p: PosterItem) {
 
 @Composable
 fun HomeScreen(client: XtreamClient, onLogout: () -> Unit, onClientChanged: (XtreamClient) -> Unit) {
-    var section by rememberSaveable { mutableStateOf(Section.LIVE) }
+    var section by rememberSaveable { mutableStateOf(Section.HOME) }
     var openSeries by remember { mutableStateOf<OpenItem?>(null) }
     var openMovie by remember { mutableStateOf<OpenItem?>(null) }
     val liveSel = remember { mutableStateOf<Category?>(null) }
@@ -135,25 +140,31 @@ fun HomeScreen(client: XtreamClient, onLogout: () -> Unit, onClientChanged: (Xtr
     Row(Modifier.fillMaxSize()) {
         // ---- Shiriti i ngushtë majtas me ikona ----
         Column(
-            Modifier.width(72.dp).fillMaxHeight().padding(vertical = 24.dp),
+            Modifier.width(84.dp).fillMaxHeight().padding(vertical = 18.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Spacer(Modifier.weight(1f))
             Section.entries.filter { it != Section.ACCOUNT }.forEach { s ->
                 val sel = s == section && !detailOpen
                 TvCard(
-                    Modifier.padding(vertical = 4.dp).size(48.dp),
-                    shape = CircleShape,
-                    bg = Color.Transparent,
-                    focusBg = Color.White.copy(alpha = .15f),
+                    Modifier.padding(vertical = 2.dp).width(76.dp).height(54.dp),
+                    shape = RoundedCornerShape(10.dp),
+                    bg = if (sel) CatSel else Color.Transparent,
+                    focusBg = Color.White.copy(alpha = .18f),
                     focusBorder = false,
+                    scaleOnFocus = 1.05f,
                     onFocus = { go(s) },
                     onClick = { go(s) },
                 ) { f ->
                     Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(s.icon, s.label, Modifier.size(24.dp), tint = if (sel || f) Color.White else TextDim)
+                        Icon(s.icon, s.label, Modifier.size(22.dp), tint = if (sel || f) Color.White else TextDim)
+                        Text(
+                            s.label, fontSize = 10.sp, maxLines = 1,
+                            color = if (sel || f) Color.White else TextDim,
+                            fontWeight = if (sel) FontWeight.Bold else FontWeight.Normal,
+                        )
                         Box(
-                            Modifier.padding(top = 4.dp).height(2.dp).width(18.dp)
+                            Modifier.padding(top = 2.dp).height(2.dp).width(16.dp)
                                 .background(if (sel) Purple else Color.Transparent)
                         )
                     }
@@ -201,71 +212,48 @@ fun HomeScreen(client: XtreamClient, onLogout: () -> Unit, onClientChanged: (Xtr
     }
 }
 
-// ================= KRYEFAQJA =================
+// ================= KRYEFAQJA (vetëm filma dhe seriale, me slide) =================
 
-data class HeroData(val title: String, val time: String?, val desc: String?, val image: String?, val isLogo: Boolean)
+data class Slide(val item: PosterItem, val isSeries: Boolean)
 
 @Composable
 fun HomeTab(client: XtreamClient, onOpenSeries: (OpenItem) -> Unit, onOpenMovie: (OpenItem) -> Unit) {
-    val ctx = LocalContext.current
-    val chans = rememberLoad("home-live") { client.allLive() }
     val movies = rememberLoad("home-vod") {
-        client.categories("vod").firstOrNull()?.let { c -> client.vod(c.id).take(30) } ?: emptyList()
+        client.allVod().sortedByDescending { it.added }.take(40)
+            .map { PosterItem(it.id, it.name, it.icon, null, it.rating, it.ext) }
     }
     val series = rememberLoad("home-series") {
-        client.categories("series").firstOrNull()?.let { c -> client.series(c.id).take(30) } ?: emptyList()
+        client.allSeries().sortedByDescending { it.added }.take(40)
+            .map { PosterItem(it.id, it.name, it.cover, it.plot) }
     }
-    var focusCh by remember { mutableStateOf<LiveStream?>(null) }
-    var hero by remember { mutableStateOf<HeroData?>(null) }
-    val firstFocus = remember { FocusRequester() }
-
-    LaunchedEffect(focusCh) {
-        val ch = focusCh ?: return@LaunchedEffect
-        hero = HeroData(ch.name, null, null, ch.icon, true)
-        delay(350)
-        val e = runCatching { client.epgNow(ch.id) }.getOrNull() ?: return@LaunchedEffect
-        hero = HeroData(
-            ch.name,
-            if (e.start > 0) "${hm(e.start)} - ${hm(e.end)}" else null,
-            listOf(e.title, e.desc).filter { it.isNotBlank() }.joinToString("\n"),
-            ch.icon, true,
-        )
+    val mList = (movies as? Load.Ok)?.value.orEmpty()
+    val sList = (series as? Load.Ok)?.value.orEmpty()
+    val slides = remember(mList, sList) {
+        val m = mList.take(6).map { Slide(it, false) }
+        val ss = sList.take(4).map { Slide(it, true) }
+        buildList { for (i in 0 until maxOf(m.size, ss.size)) { m.getOrNull(i)?.let { add(it) }; ss.getOrNull(i)?.let { add(it) } } }
+    }
+    val heroFocus = remember { FocusRequester() }
+    LaunchedEffect(slides.isNotEmpty()) {
+        if (slides.isNotEmpty()) { delay(200); runCatching { heroFocus.requestFocus() } }
+    }
+    fun open(sl: Slide) {
+        if (sl.isSeries) onOpenSeries(OpenItem(sl.item, sList)) else onOpenMovie(OpenItem(sl.item, mList))
     }
 
     Column(Modifier.fillMaxSize()) {
-        HeroBanner(hero, Modifier.fillMaxWidth().weight(0.48f))
+        Box(Modifier.fillMaxWidth().weight(0.58f)) {
+            if (slides.isEmpty()) {
+                LoadView(if (movies is Load.Err) movies else Load.Loading) {}
+            } else {
+                HeroSlider(client, slides, heroFocus, ::open)
+            }
+        }
         LazyColumn(
-            Modifier.fillMaxWidth().weight(0.52f),
-            contentPadding = PaddingValues(start = 24.dp, end = 24.dp, bottom = 32.dp, top = 8.dp),
+            Modifier.fillMaxWidth().weight(0.42f),
+            contentPadding = PaddingValues(start = 24.dp, end = 24.dp, bottom = 32.dp, top = 4.dp),
             verticalArrangement = Arrangement.spacedBy(22.dp),
         ) {
-            item {
-                RowTitle("Kanalet Live")
-                LoadView(chans, Modifier.fillMaxWidth().height(140.dp)) { all ->
-                    val list = all.take(60)
-                    LaunchedEffect(list) {
-                        if (list.isNotEmpty() && focusCh == null) {
-                            focusCh = list.first()
-                            delay(150)
-                            runCatching { firstFocus.requestFocus() }
-                        }
-                    }
-                    LazyRow(
-                        horizontalArrangement = Arrangement.spacedBy(14.dp),
-                        contentPadding = PaddingValues(8.dp),
-                    ) {
-                        itemsIndexed(list) { i, ch ->
-                            ChannelCard(
-                                i + 1, ch,
-                                Modifier.width(210.dp).let { if (i == 0) it.focusRequester(firstFocus) else it },
-                                epg = { client.epgNow(ch.id) },
-                                onFocus = { focusCh = ch },
-                                onClick = { playLive(ctx, client, list, i) },
-                            )
-                        }
-                    }
-                }
-            }
             val recent = Library.history.toList().filter { it.type != Library.LIVE }
             if (recent.isNotEmpty()) {
                 item {
@@ -278,22 +266,84 @@ fun HomeTab(client: XtreamClient, onOpenSeries: (OpenItem) -> Unit, onOpenMovie:
                 }
             }
             item {
-                RowTitle("Filma")
+                RowTitle("Filma të rinj")
                 LoadView(movies, Modifier.fillMaxWidth().height(240.dp)) { list ->
-                    val posters = remember(list) { list.map { PosterItem(it.id, it.name, it.icon, null, it.rating, it.ext) } }
-                    PosterRow(posters,
-                        onFocus = { p -> focusCh = null; hero = HeroData(p.title, p.rating?.let { "★ $it" }, null, p.image, false) },
-                        onClick = { p -> onOpenMovie(OpenItem(p, posters)) })
+                    PosterRow(list) { p -> onOpenMovie(OpenItem(p, list)) }
                 }
             }
             item {
-                RowTitle("Seriale")
+                RowTitle("Seriale të reja")
                 LoadView(series, Modifier.fillMaxWidth().height(240.dp)) { list ->
-                    val posters = remember(list) { list.map { PosterItem(it.id, it.name, it.cover, it.plot) } }
-                    PosterRow(posters,
-                        onFocus = { p -> focusCh = null; hero = HeroData(p.title, null, p.info, p.image, false) },
-                        onClick = { p -> onOpenSeries(OpenItem(p, posters)) })
+                    PosterRow(list) { p -> onOpenSeries(OpenItem(p, list)) }
                 }
+            }
+        }
+    }
+}
+
+/** Slide i madh që ndërrohet vetë çdo 7 sekonda; ◀ ▶ me telekomandë për ta ndërruar */
+@Composable
+fun HeroSlider(client: XtreamClient, slides: List<Slide>, focus: FocusRequester, onOpen: (Slide) -> Unit) {
+    var idx by remember(slides) { mutableStateOf(0) }
+    LaunchedEffect(slides, idx) {
+        delay(7000)
+        if (slides.size > 1) idx = (idx + 1) % slides.size
+    }
+    val sl = slides[idx.coerceIn(0, slides.lastIndex)]
+    val info = rememberLoad("slide", sl.isSeries, sl.item.id) {
+        if (sl.isSeries) client.seriesFull(sl.item.id).info else client.vodInfo(sl.item.id)
+    }
+    val inf = (info as? Load.Ok)?.value
+
+    Box(Modifier.fillMaxSize()) {
+        AsyncImage(
+            inf?.backdrop ?: sl.item.image, null,
+            Modifier.align(Alignment.TopEnd).fillMaxHeight().fillMaxWidth(0.72f).alpha(0.75f),
+            contentScale = ContentScale.Crop,
+        )
+        Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(0.28f to Bg, 0.7f to Color.Transparent)))
+        Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0.55f to Color.Transparent, 1f to Bg)))
+
+        Row(Modifier.align(Alignment.TopEnd).padding(28.dp)) {
+            Text("8K", color = Color.White, fontSize = 32.sp, fontWeight = FontWeight.Black)
+            Text("tv", color = Accent, fontSize = 32.sp, fontWeight = FontWeight.Black)
+        }
+        Column(
+            Modifier.align(Alignment.CenterStart).padding(start = 36.dp, top = 24.dp).fillMaxWidth(0.5f),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text(if (sl.isSeries) "SERIAL" else "FILM", color = Accent, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+            Text(sl.item.title, fontSize = 42.sp, fontWeight = FontWeight.Bold, lineHeight = 48.sp,
+                maxLines = 2, overflow = TextOverflow.Ellipsis)
+            val meta = listOfNotNull(inf?.year, inf?.duration, (inf?.rating ?: sl.item.rating)?.let { "★ $it" }, inf?.genre)
+                .joinToString("   ·   ")
+            if (meta.isNotBlank()) Text(meta, color = TextDim, fontSize = 15.sp, maxLines = 1)
+            (inf?.plot ?: sl.item.info)?.let {
+                Text(it, fontSize = 16.sp, lineHeight = 23.sp, maxLines = 3, overflow = TextOverflow.Ellipsis,
+                    color = Color(0xFFD6D6DA))
+            }
+            ActionButton(
+                if (sl.isSeries) "▶   Shiko serialin" else "▶   Shiko filmin", Accent,
+                Modifier.focusRequester(focus).width(230.dp).onPreviewKeyEvent { e ->
+                    if (e.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                    when (e.key) {
+                        Key.DirectionRight -> { idx = (idx + 1) % slides.size; true }
+                        Key.DirectionLeft -> if (idx > 0) { idx -= 1; true } else false
+                        else -> false
+                    }
+                },
+            ) { onOpen(sl) }
+        }
+        // pikat e slide-ve
+        Row(
+            Modifier.align(Alignment.BottomEnd).padding(end = 36.dp, bottom = 18.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            slides.indices.forEach { i ->
+                Box(
+                    Modifier.height(4.dp).width(if (i == idx) 22.dp else 8.dp).clip(RoundedCornerShape(2.dp))
+                        .background(if (i == idx) Color.White else Color.White.copy(alpha = .35f))
+                )
             }
         }
     }
@@ -309,64 +359,22 @@ fun PosterRow(items: List<PosterItem>, onFocus: (PosterItem) -> Unit = {}, onCli
         }
 }
 
-@Composable
-fun HeroBanner(hero: HeroData?, modifier: Modifier) {
-    Box(modifier) {
-        val img = hero?.image
-        if (hero != null && img != null) {
-            if (hero.isLogo) {
-                AsyncImage(
-                    img, null,
-                    Modifier.align(Alignment.CenterEnd).padding(end = 90.dp, top = 40.dp)
-                        .fillMaxHeight(0.6f).aspectRatio(1.6f),
-                    contentScale = ContentScale.Fit,
-                )
-            } else {
-                AsyncImage(
-                    img, null,
-                    Modifier.align(Alignment.CenterEnd).fillMaxHeight().fillMaxWidth(0.6f).alpha(0.55f),
-                    contentScale = ContentScale.Crop,
-                )
-                Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(0.35f to Bg, 0.75f to Color.Transparent)))
-                Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0.6f to Color.Transparent, 1f to Bg.copy(alpha = .9f))))
-            }
-        }
-        Row(Modifier.align(Alignment.TopEnd).padding(28.dp)) {
-            Text("8K", color = Color.White, fontSize = 34.sp, fontWeight = FontWeight.Black)
-            Text("tv", color = Accent, fontSize = 34.sp, fontWeight = FontWeight.Black)
-        }
-        Column(
-            Modifier.align(Alignment.CenterStart).padding(start = 36.dp, top = 30.dp).fillMaxWidth(0.55f),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Text(
-                hero?.title ?: "", fontSize = 46.sp, fontWeight = FontWeight.Bold,
-                maxLines = 2, overflow = TextOverflow.Ellipsis, lineHeight = 52.sp,
-            )
-            hero?.time?.let { Text(it, color = TextDim, fontSize = 16.sp) }
-            hero?.desc?.takeIf { it.isNotBlank() }?.let {
-                Text(it, fontSize = 18.sp, lineHeight = 26.sp, maxLines = 3, overflow = TextOverflow.Ellipsis)
-            }
-        }
-    }
-}
-
 // ================= LIVE / FILMA / SERIALE =================
 
 @Composable
 fun BrowseTab(
+    top: List<Category>,
     cats: Load<List<Category>>,
     selState: MutableState<Category?>,
     content: @Composable (Category) -> Unit,
 ) {
     var sel by selState
     LoadView(cats) { list ->
-        if (list.isEmpty()) Empty() else {
-            LaunchedEffect(list) { if (sel == null || list.none { it.id == sel?.id }) sel = list.first() }
-            Row(Modifier.fillMaxSize()) {
-                CategoryColumn(list, sel?.id) { sel = it }
-                Box(Modifier.weight(1f).fillMaxHeight()) { sel?.let { content(it) } }
-            }
+        val all = top + list
+        LaunchedEffect(list) { if (sel == null || all.none { it.id == sel?.id }) sel = all.firstOrNull() }
+        Row(Modifier.fillMaxSize()) {
+            CountryCategoryColumn(top, list, sel?.id) { sel = it }
+            Box(Modifier.weight(1f).fillMaxHeight()) { sel?.let { content(it) } }
         }
     }
 }
@@ -374,11 +382,10 @@ fun BrowseTab(
 @Composable
 fun LiveTab(client: XtreamClient, selState: MutableState<Category?>) {
     val ctx = LocalContext.current
-    val cats = rememberLoad("live-cats") {
-        listOf(Category(ALL, "All"), Category(FAV, "♥ Të preferuarat")) + client.categories("live")
-    }
+    val cats = rememberLoad("live-cats") { client.categories("live") }
+    val top = remember { listOf(Category(ALL, "All"), Category(FAV, "♥ Të preferuarat")) }
     val favs = Library.favorites.filter { it.type == Library.LIVE }.map { it.toLive() }
-    BrowseTab(cats, selState) { cat ->
+    BrowseTab(top, cats, selState) { cat ->
         val streams = rememberLoad("live", cat.id, if (cat.id == FAV) favs else null) {
             when (cat.id) {
                 ALL -> client.allLive()
@@ -420,8 +427,8 @@ fun PosterGrid(items: List<PosterItem>, onClick: (PosterItem) -> Unit) {
 
 @Composable
 fun MoviesTab(client: XtreamClient, selState: MutableState<Category?>, onOpen: (OpenItem) -> Unit) {
-    val cats = rememberLoad("vod-cats") { listOf(Category(ALL, "All")) + client.categories("vod") }
-    BrowseTab(cats, selState) { cat ->
+    val cats = rememberLoad("vod-cats") { client.categories("vod") }
+    BrowseTab(remember { listOf(Category(ALL, "All")) }, cats, selState) { cat ->
         val movies = rememberLoad("vod", cat.id) { if (cat.id == ALL) client.allVod() else client.vod(cat.id) }
         LoadView(movies) { list ->
             val posters = remember(list) { list.map { PosterItem(it.id, it.name, it.icon, null, it.rating, it.ext) } }
@@ -432,8 +439,8 @@ fun MoviesTab(client: XtreamClient, selState: MutableState<Category?>, onOpen: (
 
 @Composable
 fun SeriesTab(client: XtreamClient, selState: MutableState<Category?>, onOpen: (OpenItem) -> Unit) {
-    val cats = rememberLoad("series-cats") { listOf(Category(ALL, "All")) + client.categories("series") }
-    BrowseTab(cats, selState) { cat ->
+    val cats = rememberLoad("series-cats") { client.categories("series") }
+    BrowseTab(remember { listOf(Category(ALL, "All")) }, cats, selState) { cat ->
         val series = rememberLoad("series", cat.id) { if (cat.id == ALL) client.allSeries() else client.series(cat.id) }
         LoadView(series) { list ->
             val posters = remember(list) { list.map { PosterItem(it.id, it.name, it.cover, it.plot) } }

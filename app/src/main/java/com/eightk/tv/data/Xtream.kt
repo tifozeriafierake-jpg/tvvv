@@ -87,8 +87,8 @@ data class AccountInfo(
 
 data class Category(val id: String, val name: String)
 data class LiveStream(val id: Int, val name: String, val icon: String?)
-data class Vod(val id: Int, val name: String, val icon: String?, val ext: String, val rating: String?)
-data class Series(val id: Int, val name: String, val cover: String?, val plot: String?)
+data class Vod(val id: Int, val name: String, val icon: String?, val ext: String, val rating: String?, val added: Long = 0)
+data class Series(val id: Int, val name: String, val cover: String?, val plot: String?, val added: Long = 0)
 data class Episode(val id: String, val title: String, val season: Int, val num: Int, val ext: String, val image: String?)
 
 private val http = OkHttpClient.Builder()
@@ -97,6 +97,13 @@ private val http = OkHttpClient.Builder()
     .followRedirects(true)
     .followSslRedirects(true)
     .build()
+
+/** Rreshtat ndarës të serverit (p.sh. "##### UNITED KINGDOM #####") nuk janë kanale */
+fun isSeparator(name: String): Boolean {
+    val t = name.trim()
+    return t.isEmpty() || t.startsWith("#") || t.startsWith("===") || t.startsWith("***") ||
+        (t.startsWith("---") && t.endsWith("---"))
+}
 
 private fun JSONObject.str(key: String): String? =
     optString(key).takeIf { it.isNotBlank() && it != "null" }
@@ -206,27 +213,29 @@ class XtreamClient(server: String, val user: String, val pass: String) {
     suspend fun liveStreams(categoryId: String): List<LiveStream> = cached("live-$categoryId") {
         array(call("get_live_streams", "&category_id=${enc(categoryId)}")).objects {
             LiveStream(it.optInt("stream_id"), it.optString("name"), it.str("stream_icon"))
-        }
+        }.filterNot { isSeparator(it.name) }
     }
 
     /** Të gjitha kanalet (për faqen kryesore dhe kërkimin) */
     suspend fun allLive(): List<LiveStream> = cached("live-all") {
         array(call("get_live_streams")).objects {
             LiveStream(it.optInt("stream_id"), it.optString("name"), it.str("stream_icon"))
-        }
+        }.filterNot { isSeparator(it.name) }
     }
 
     suspend fun allVod(): List<Vod> = cached("vod-all") {
         array(call("get_vod_streams")).objects {
             Vod(it.optInt("stream_id"), it.optString("name"), it.str("stream_icon"),
-                it.str("container_extension") ?: "mp4", it.str("rating"))
-        }
+                it.str("container_extension") ?: "mp4", it.str("rating"),
+                it.optString("added").toLongOrNull() ?: 0L)
+        }.filterNot { isSeparator(it.name) }
     }
 
     suspend fun allSeries(): List<Series> = cached("series-all") {
         array(call("get_series")).objects {
-            Series(it.optInt("series_id"), it.optString("name"), it.str("cover"), it.str("plot"))
-        }
+            Series(it.optInt("series_id"), it.optString("name"), it.str("cover"), it.str("plot"),
+                it.optString("last_modified").toLongOrNull() ?: 0L)
+        }.filterNot { isSeparator(it.name) }
     }
 
     private val epgCache = HashMap<Int, Pair<Long, List<EpgNow>>>()
@@ -284,14 +293,16 @@ class XtreamClient(server: String, val user: String, val pass: String) {
             Vod(
                 it.optInt("stream_id"), it.optString("name"), it.str("stream_icon"),
                 it.str("container_extension") ?: "mp4", it.str("rating"),
+                it.optString("added").toLongOrNull() ?: 0L,
             )
-        }
+        }.filterNot { isSeparator(it.name) }
     }
 
     suspend fun series(categoryId: String): List<Series> = cached("series-$categoryId") {
         array(call("get_series", "&category_id=${enc(categoryId)}")).objects {
-            Series(it.optInt("series_id"), it.optString("name"), it.str("cover"), it.str("plot"))
-        }
+            Series(it.optInt("series_id"), it.optString("name"), it.str("cover"), it.str("plot"),
+                it.optString("last_modified").toLongOrNull() ?: 0L)
+        }.filterNot { isSeparator(it.name) }
     }
 
     suspend fun seriesFull(seriesId: Int): SeriesFull = cached("sfull-$seriesId") {
