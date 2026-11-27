@@ -1,0 +1,230 @@
+package com.eightk.tv.ui
+
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
+import coil.compose.AsyncImage
+import com.eightk.tv.data.Category
+import com.eightk.tv.data.LiveStream
+import kotlinx.coroutines.CancellationException
+
+// ---- Ngjyrat (stil Nimi TV) ----
+val Accent = Color(0xFFE4252B)      // e kuqe
+val Purple = Color(0xFF8E7CFF)      // vija e zgjedhjes
+val Bg = Color(0xFF0B1118)
+val CardBg = Color(0xFF25282D)
+val TextDim = Color(0xFFB4B9C2)
+
+val BgBrush = Brush.linearGradient(
+    listOf(Color(0xFF0A0F16), Color(0xFF0F1C29), Color(0xFF1B3A4F)),
+    start = Offset(0f, Float.POSITIVE_INFINITY),
+    end = Offset(Float.POSITIVE_INFINITY, 0f),
+)
+
+@Composable
+fun AppTheme(content: @Composable () -> Unit) {
+    MaterialTheme(colorScheme = darkColorScheme(primary = Accent, secondary = Purple, background = Bg, surface = CardBg)) {
+        Surface(Modifier.fillMaxSize().background(BgBrush), color = Color.Transparent, contentColor = Color.White) {
+            content()
+        }
+    }
+}
+
+/** Kartë e fokusueshme me telekomandë: zmadhohet dhe merr kornizë të bardhë kur fokusohet */
+@Composable
+fun TvCard(
+    modifier: Modifier = Modifier,
+    shape: Shape = RoundedCornerShape(8.dp),
+    bg: Color = CardBg,
+    focusBg: Color = bg,
+    scaleOnFocus: Float = 1.07f,
+    onFocus: () -> Unit = {},
+    onClick: () -> Unit,
+    content: @Composable BoxScope.(focused: Boolean) -> Unit,
+) {
+    var focused by remember { mutableStateOf(false) }
+    val scale by animateFloatAsState(if (focused) scaleOnFocus else 1f, label = "scale")
+    Box(
+        modifier
+            .zIndex(if (focused) 1f else 0f)
+            .graphicsLayer { scaleX = scale; scaleY = scale }
+            .clip(shape)
+            .background(if (focused) focusBg else bg)
+            .then(if (focused) Modifier.border(3.dp, Color.White, shape) else Modifier)
+            .onFocusChanged { focused = it.isFocused; if (it.isFocused) onFocus() }
+            .clickable(remember { MutableInteractionSource() }, indication = null, onClick = onClick)
+    ) { content(focused) }
+}
+
+/** Skedat e kategorive (si "All  LAJME  SPORT  FEMIJE") */
+@Composable
+fun CategoryTabs(cats: List<Category>, selectedId: String?, onSelect: (Category) -> Unit) {
+    LazyRow(
+        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        items(cats) { c ->
+            val sel = c.id == selectedId
+            TvCard(
+                bg = if (sel) Color.White.copy(alpha = .12f) else Color.Transparent,
+                focusBg = Color.White.copy(alpha = .18f),
+                shape = RoundedCornerShape(6.dp),
+                scaleOnFocus = 1.03f,
+                onFocus = { onSelect(c) },
+                onClick = { onSelect(c) },
+            ) { f ->
+                Column(
+                    Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Text(
+                        c.name.uppercase(), fontSize = 14.sp, maxLines = 1,
+                        fontWeight = if (sel) FontWeight.Bold else FontWeight.Medium,
+                        color = if (sel || f) Color.White else TextDim,
+                    )
+                    Box(
+                        Modifier.padding(top = 4.dp).height(2.dp).width(22.dp)
+                            .background(if (sel) Purple else Color.Transparent)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ChannelCard(
+    number: Int,
+    ch: LiveStream,
+    modifier: Modifier = Modifier,
+    onFocus: () -> Unit = {},
+    onClick: () -> Unit,
+) {
+    TvCard(modifier.aspectRatio(1.55f), onFocus = onFocus, onClick = onClick) {
+        if (ch.icon != null) {
+            AsyncImage(
+                ch.icon, ch.name,
+                Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 18.dp),
+                contentScale = ContentScale.Fit,
+            )
+        } else {
+            Text(
+                ch.name, Modifier.align(Alignment.Center).padding(10.dp),
+                fontSize = 16.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center,
+                maxLines = 2, overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Text(
+            "$number", Modifier.align(Alignment.BottomEnd).padding(8.dp),
+            fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.White,
+        )
+    }
+}
+
+data class PosterItem(val id: Int, val title: String, val image: String?, val info: String? = null, val rating: String? = null)
+
+@Composable
+fun PosterCard(
+    p: PosterItem,
+    modifier: Modifier = Modifier,
+    onFocus: () -> Unit = {},
+    onClick: () -> Unit,
+) {
+    TvCard(modifier.aspectRatio(2f / 3f), onFocus = onFocus, onClick = onClick) { focused ->
+        AsyncImage(p.image, p.title, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+        if (focused || p.image == null) {
+            Box(
+                Modifier.fillMaxSize().background(
+                    Brush.verticalGradient(0.5f to Color.Transparent, 1f to Color.Black.copy(alpha = .9f))
+                )
+            )
+            Text(
+                p.title, Modifier.align(Alignment.BottomStart).padding(8.dp),
+                fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+@Composable
+fun RowTitle(text: String, modifier: Modifier = Modifier) =
+    Text(text, modifier.padding(start = 8.dp, bottom = 10.dp), fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+
+// ---- Ngarkimi i të dhënave ----
+
+sealed interface Load<out T> {
+    data object Loading : Load<Nothing>
+    data class Ok<T>(val value: T) : Load<T>
+    data class Err(val msg: String) : Load<Nothing>
+}
+
+@Composable
+fun <T> rememberLoad(vararg keys: Any?, block: suspend () -> T): Load<T> {
+    val state by produceState<Load<T>>(Load.Loading, *keys) {
+        value = Load.Loading
+        value = try {
+            Load.Ok(block())
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Load.Err(e.message ?: "Gabim në lidhje")
+        }
+    }
+    return state
+}
+
+@Composable
+fun <T> LoadView(state: Load<T>, modifier: Modifier = Modifier.fillMaxSize(), content: @Composable (T) -> Unit) {
+    when (state) {
+        Load.Loading -> Box(modifier, Alignment.Center) { CircularProgressIndicator(color = Accent) }
+        is Load.Err -> Box(modifier, Alignment.Center) { Text("⚠ ${state.msg}", color = Color(0xFFFF6B6B)) }
+        is Load.Ok -> content(state.value)
+    }
+}
+
+@Composable
+fun Empty(text: String = "Nuk ka përmbajtje") =
+    Box(Modifier.fillMaxWidth().padding(40.dp), Alignment.Center) { Text(text, color = TextDim) }
