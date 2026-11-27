@@ -2,7 +2,7 @@
 
 Dizajn në stilin e Nimi TV. Lidhet me Xtream Codes API dhe provon automatikisht të gjithë serverët:
 8k.cms-only.ru, apps.dakord.xyz, not90904.matrix.dakord.xyz, not90904.matrix.perty.xyz,
-tv.business-cloud-8.ru, pro.business-cloud-8.ru, pro.dakord.xyz, pro.perty.xyz.
+tv.business-cloud-8.ru, pro.business-cloud-8.ru, pro.dakord.xyz, pro.perty.xyz, cf.dakord.xyz, cf.perty.xyz.
 Përdoret i pari që përgjigjet; nëse ai bie më vonë, aplikacioni kalon vetë te një tjetër.
 Përdoruesi shkruan vetëm **Username** dhe **Password** – hapen Live TV, Filmat dhe Serialet.
 

@@ -30,6 +30,8 @@ object Config {
         "http://pro.business-cloud-8.ru",
         "http://pro.dakord.xyz",
         "http://pro.perty.xyz",
+        "http://cf.dakord.xyz",
+        "http://cf.perty.xyz",
     )
     val SERVER = SERVERS.first()
     const val USER_AGENT = "IPTVSmartersPlayer"
@@ -41,6 +43,8 @@ data class VodInfo(
     val plot: String?, val genre: String?, val cast: String?, val director: String?,
     val year: String?, val duration: String?, val rating: String?, val backdrop: String?,
 )
+
+data class SeriesFull(val info: VodInfo, val episodes: List<Episode>)
 
 data class EpgNow(val title: String, val desc: String, val start: Long, val end: Long)
 
@@ -57,7 +61,21 @@ suspend fun loginAny(user: String, pass: String): XtreamClient = coroutineScope 
         r.getOrNull()?.let { ok -> jobs.forEach { it.cancel() }; return@coroutineScope ok }
         if (r.exceptionOrNull() is AuthException) authError = true
     }
-    throw IOException(if (authError) "Username ose password i gabuar" else "Asnjë server nuk u përgjigj. Kontrollo internetin/VPN.")
+    if (authError) throw AuthException("Username ose password i gabuar")
+    throw IOException("Asnjë server nuk u përgjigj. Kontrollo internetin.")
+}
+
+/** Provon disa serverë njëkohësisht; kthen përgjigjen e parë të suksesshme. */
+private suspend fun <T> raceServers(servers: List<String>, block: suspend (String) -> T): Pair<String, T> = coroutineScope {
+    val ch = Channel<Result<Pair<String, T>>>(servers.size)
+    val jobs = servers.map { s -> launch { ch.send(runCatching { s to block(s) }) } }
+    var last: Throwable? = null
+    repeat(servers.size) {
+        val r = ch.receive()
+        r.getOrNull()?.let { ok -> jobs.forEach { it.cancel() }; return@coroutineScope ok }
+        last = r.exceptionOrNull()
+    }
+    throw (last as? IOException) ?: IOException("Asnjë server nuk u përgjigj")
 }
 
 data class AccountInfo(
@@ -89,9 +107,11 @@ private inline fun <T> JSONArray.objects(f: (JSONObject) -> T): List<T> =
 /** Klienti për Xtream Codes API (player_api.php) */
 class XtreamClient(server: String, val user: String, val pass: String) {
 
-    val server: String = server.trim().trimEnd('/').let {
+    /** Serveri aktiv. Ndryshon vetë nëse ky nuk përgjigjet (p.sh. kur ndizet/fiket VPN). */
+    var server: String = server.trim().trimEnd('/').let {
         if (it.startsWith("http://") || it.startsWith("https://")) it else "http://$it"
     }
+        private set
 
     private val cache = HashMap<String, Any>()
     var account: AccountInfo? = null
@@ -99,9 +119,9 @@ class XtreamClient(server: String, val user: String, val pass: String) {
 
     private fun enc(s: String) = URLEncoder.encode(s, "UTF-8")
 
-    private suspend fun call(action: String?, params: String = ""): String {
+    private suspend fun request(base: String, action: String?, params: String): String {
         val url = buildString {
-            append(server).append("/player_api.php?username=").append(enc(user))
+            append(base).append("/player_api.php?username=").append(enc(user))
             append("&password=").append(enc(pass))
             if (action != null) append("&action=").append(action)
             append(params)
@@ -118,13 +138,33 @@ class XtreamClient(server: String, val user: String, val pass: String) {
                     response.use { r ->
                         try {
                             if (!r.isSuccessful) throw IOException("Serveri ktheu gabim ${r.code}")
-                            cont.resume(r.body?.string().orEmpty())
+                            val text = r.body?.string().orEmpty()
+                            val t = text.trimStart()
+                            // Faqe bllokimi (pa VPN) ose përgjigje e çuditshme -> provo një server tjetër
+                            if (!t.startsWith("{") && !t.startsWith("[")) throw IOException("Përgjigje e pavlefshme nga serveri")
+                            cont.resume(text)
                         } catch (e: Exception) {
                             if (cont.isActive) cont.resumeWithException(e)
                         }
                     }
                 }
             })
+        }
+    }
+
+    private suspend fun call(action: String?, params: String = ""): String {
+        return try {
+            request(server, action, params)
+        } catch (e: IOException) {
+            val others = Config.SERVERS.filter { it != server }
+            if (others.isEmpty()) throw e
+            val (s, text) = try {
+                raceServers(others) { request(it, action, params) }
+            } catch (ignored: IOException) {
+                throw e
+            }
+            server = s
+            text
         }
     }
 
@@ -214,19 +254,22 @@ class XtreamClient(server: String, val user: String, val pass: String) {
 
     suspend fun vodInfo(id: Int): VodInfo = cached("vinfo-$id") {
         val o = JSONObject(call("get_vod_info", "&vod_id=$id"))
-        val i = o.optJSONObject("info") ?: JSONObject()
+        parseInfo(o.optJSONObject("info") ?: JSONObject())
+    }
+
+    private fun parseInfo(i: JSONObject): VodInfo {
         val backdrop = when (val b = i.opt("backdrop_path")) {
             is JSONArray -> b.optString(0)
             is String -> b
             else -> null
         }?.takeIf { it.isNotBlank() && it != "null" }
-        VodInfo(
+        return VodInfo(
             plot = i.str("plot") ?: i.str("description"),
             genre = i.str("genre"),
             cast = i.str("cast") ?: i.str("actors"),
             director = i.str("director"),
-            year = (i.str("releasedate") ?: i.str("release_date"))?.take(4),
-            duration = i.str("duration"),
+            year = (i.str("releasedate") ?: i.str("releaseDate") ?: i.str("release_date"))?.take(4),
+            duration = i.str("duration") ?: i.str("episode_run_time")?.let { "$it min" },
             rating = i.str("rating"),
             backdrop = backdrop,
         )
@@ -251,7 +294,7 @@ class XtreamClient(server: String, val user: String, val pass: String) {
         }
     }
 
-    suspend fun episodes(seriesId: Int): List<Episode> = cached("eps-$seriesId") {
+    suspend fun seriesFull(seriesId: Int): SeriesFull = cached("sfull-$seriesId") {
         val o = JSONObject(call("get_series_info", "&series_id=$seriesId"))
         val out = mutableListOf<Episode>()
         val parse: (JSONArray) -> Unit = { a ->
@@ -270,7 +313,10 @@ class XtreamClient(server: String, val user: String, val pass: String) {
             is JSONObject -> eps.keys().forEach { k -> eps.optJSONArray(k)?.let(parse) }
             is JSONArray -> for (i in 0 until eps.length()) eps.optJSONArray(i)?.let(parse)
         }
-        out.sortedWith(compareBy({ it.season }, { it.num }))
+        SeriesFull(
+            parseInfo(o.optJSONObject("info") ?: JSONObject()),
+            out.sortedWith(compareBy({ it.season }, { it.num })),
+        )
     }
 
     fun liveUrl(id: Int) = "$server/live/$user/$pass/$id.m3u8"

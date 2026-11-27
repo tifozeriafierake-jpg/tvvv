@@ -50,6 +50,12 @@ import coil.compose.AsyncImage
 import com.eightk.tv.data.Category
 import com.eightk.tv.data.LiveStream
 import kotlinx.coroutines.CancellationException
+import android.widget.Toast
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.ui.platform.LocalContext
+import com.eightk.tv.data.Library
+import com.eightk.tv.data.SavedItem
 import kotlinx.coroutines.delay
 import com.eightk.tv.data.EpgNow
 import java.text.SimpleDateFormat
@@ -102,6 +108,7 @@ fun AppTheme(content: @Composable () -> Unit) {
 }
 
 /** Kartë e fokusueshme me telekomandë: zmadhohet dhe merr kornizë të bardhë kur fokusohet */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun TvCard(
     modifier: Modifier = Modifier,
@@ -111,6 +118,7 @@ fun TvCard(
     scaleOnFocus: Float = 1.07f,
     focusBorder: Boolean = true,
     onFocus: () -> Unit = {},
+    onLongClick: (() -> Unit)? = null,
     onClick: () -> Unit,
     content: @Composable BoxScope.(focused: Boolean) -> Unit,
 ) {
@@ -124,7 +132,12 @@ fun TvCard(
             .background(if (focused) focusBg else bg)
             .then(if (focused && focusBorder) Modifier.border(3.dp, Color.White, shape) else Modifier)
             .onFocusChanged { focused = it.isFocused; if (it.isFocused) onFocus() }
-            .clickable(remember { MutableInteractionSource() }, indication = null, onClick = onClick)
+            .combinedClickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onLongClick = onLongClick,
+                onClick = onClick,
+            )
     ) { content(focused) }
 }
 
@@ -206,8 +219,17 @@ fun ChannelCard(
     onFocus: () -> Unit = {},
     onClick: () -> Unit,
 ) {
+    val ctx = LocalContext.current
     var now by remember(ch.id) { mutableStateOf<EpgNow?>(null) }
-    TvCard(modifier.aspectRatio(1.35f), onFocus = onFocus, onClick = onClick, scaleOnFocus = 1.06f) { focused ->
+    val fav = Library.isFav(Library.LIVE, ch.id)
+    TvCard(
+        modifier.aspectRatio(1.35f), onFocus = onFocus, onClick = onClick, scaleOnFocus = 1.06f,
+        onLongClick = {
+            val added = Library.toggleFav(SavedItem(Library.LIVE, ch.id, ch.name, ch.icon))
+            Toast.makeText(ctx, if (added) "♥ U shtua te të preferuarat" else "U hoq nga të preferuarat", Toast.LENGTH_SHORT).show()
+        },
+    ) { focused ->
+        if (fav) Text("♥", Modifier.align(Alignment.TopStart).padding(8.dp), color = Accent, fontSize = 14.sp)
         if (epg != null) {
             LaunchedEffect(focused, ch.id) {
                 if (focused) { delay(250); now = runCatching { epg() }.getOrNull() }

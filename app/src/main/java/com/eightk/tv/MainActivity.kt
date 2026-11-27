@@ -8,6 +8,7 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import com.eightk.tv.data.Library
 import com.eightk.tv.data.Prefs
 import com.eightk.tv.ui.AppTheme
 import com.eightk.tv.ui.HomeScreen
@@ -17,6 +18,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val ctx = this
+        Library.init(this)
         setContent {
             AppTheme {
                 var client by remember { mutableStateOf(Prefs.load(ctx)) }

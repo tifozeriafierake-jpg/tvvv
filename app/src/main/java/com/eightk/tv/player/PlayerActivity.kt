@@ -33,6 +33,8 @@ import androidx.lifecycle.lifecycleScope
 import coil.load
 import com.eightk.tv.data.Config
 import com.eightk.tv.data.XtreamClient
+import com.eightk.tv.data.Library
+import com.eightk.tv.data.SavedItem
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
@@ -73,7 +75,8 @@ class PlayerActivity : ComponentActivity() {
     private lateinit var progress: ProgressBar
     private var epgJob: Job? = null
     private var index = 0
-    private var triedTs = false
+    private var attempts: List<String> = emptyList()
+    private var attempt = 0
     private var digits = ""
     private val handler = Handler(Looper.getMainLooper())
     private val hideInfo = Runnable { info.visibility = View.GONE }
@@ -89,6 +92,7 @@ class PlayerActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         if (items.isEmpty()) { finish(); return }
+        Library.init(this)
         index = (savedInstanceState?.getInt("index") ?: intent.getIntExtra("index", 0))
             .coerceIn(0, items.lastIndex)
 
@@ -154,11 +158,10 @@ class PlayerActivity : ComponentActivity() {
 
         player.addListener(object : Player.Listener {
             override fun onPlayerError(error: PlaybackException) {
-                val url = items[index].url
-                // Disa serverë nuk japin HLS: provo formatin .ts
-                if (live && !triedTs && url.endsWith(".m3u8")) {
-                    triedTs = true
-                    start(url.removeSuffix(".m3u8") + ".ts")
+                // Provo formatin .ts dhe pastaj serverët e tjerë (me/pa VPN)
+                if (attempt + 1 < attempts.size) {
+                    attempt++
+                    start(attempts[attempt])
                     return
                 }
                 showText("Nuk u hap: ${items[index].title}", error.errorCodeName, 8000)
@@ -174,9 +177,31 @@ class PlayerActivity : ComponentActivity() {
 
     private fun play(i: Int) {
         index = i
-        triedTs = false
-        start(items[i].url)
+        attempts = buildAttempts(items[i].url)
+        attempt = 0
+        start(attempts[0])
+        val cur = items[i]
+        if (live && cur.streamId != null) {
+            Library.addHistory(SavedItem(Library.LIVE, cur.streamId, cur.title, cur.logo))
+        }
         showChannel()
+    }
+
+    /** Lista e adresave për t'u provuar: serveri aktual, pastaj të tjerët; për live edhe .ts */
+    private fun buildAttempts(url: String): List<String> {
+        val base = Config.SERVERS.firstOrNull { url.startsWith("$it/") }
+            ?: Playback.client?.server?.takeIf { url.startsWith("$it/") }
+        val paths = if (live && url.endsWith(".m3u8")) listOf(url, url.removeSuffix(".m3u8") + ".ts") else listOf(url)
+        if (base == null) return paths
+        val others = Config.SERVERS.filter { it != base }
+        return paths + others.flatMap { o -> paths.map { o + it.removePrefix(base) } }
+    }
+
+    private fun toggleFavorite() {
+        val cur = items[index]
+        val id = cur.streamId ?: return
+        val added = Library.toggleFav(SavedItem(Library.LIVE, id, cur.title, cur.logo))
+        showText(if (added) "♥ U shtua te të preferuarat" else "U hoq nga të preferuarat", cur.title)
     }
 
     private fun showChannel() {
@@ -253,8 +278,14 @@ class PlayerActivity : ComponentActivity() {
             when (event.keyCode) {
                 KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_CHANNEL_DOWN -> { zap(-1); return true }
                 KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_CHANNEL_UP -> { zap(+1); return true }
-                KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_INFO -> {
-                    showChannel(); return true
+                KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> {
+                    // Shtypje e gjatë = të preferuarat; shtypje e shkurtër = info + EPG
+                    if (event.repeatCount == 1) toggleFavorite() else if (event.repeatCount == 0) showChannel()
+                    return true
+                }
+                KeyEvent.KEYCODE_INFO -> { showChannel(); return true }
+                KeyEvent.KEYCODE_MENU, KeyEvent.KEYCODE_BOOKMARK, KeyEvent.KEYCODE_PROG_RED -> {
+                    toggleFavorite(); return true
                 }
                 in KeyEvent.KEYCODE_0..KeyEvent.KEYCODE_9 -> {
                     digits += (event.keyCode - KeyEvent.KEYCODE_0).toString()
